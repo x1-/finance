@@ -1,0 +1,15 @@
+*.log
+
+# Exclude OS X folder attributes
+.DS_Store
+._*
+
+# Exclude temp nibs and swap files
+*~.nib
+*.swp
+
+# backup files
+*~
+
+#build files
+target

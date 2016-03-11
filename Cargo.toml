@@ -1,0 +1,10 @@
+[package]
+name = "finance"
+version = "0.1.0"
+authors = ["x1 <viva008@gmail.com>"]
+
+[dependencies]
+html5ever = "*"
+tendril = "*"
+solicit = "*"
+
