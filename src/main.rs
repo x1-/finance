@@ -1,32 +1,66 @@
-extern crate solicit;
-use solicit::http::client::CleartextConnector;
-use solicit::client::SimpleClient;
-use std::str;
+extern crate csv;
+extern crate env_logger;
+extern crate hyper;
+extern crate hyper_openssl;
+extern crate rustc_serialize;
 
-// extern crate tendril;
-// extern crate html5ever;
 
-// use std::io::{self, Write};
-// use std::default::Default;
-// use tendril::{ByteTendril, ReadExt};
-// use html5ever::driver::ParseOpts;
-// use html5ever::tokenizer::Attribute;
-// use html5ever::tree_builder::TreeBuilderOpts;
-// use html5ever::{parse as parse_ever, one_input, serialize};
+mod api_client;
 
-//use scraper::{Selector, Html};
+//static URL: &'static str = "https://www.google.co.jp/";
+//static url_base: &'static str = "http://www.google.com/finance/getprices?p={term}&f=d,h,o,l,c,v&i={tick}&x={market}&q={code}";
 
-//use html5ever::rcdom::{RcDom, Handle, Element, ElementEnum, NodeEnum, Node, Text};
-
-static HOST: &'static str = "www.google.com";
-static UA: &'static str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/48.0.2564.116 Safari/537.36";
+#[derive(RustcDecodable)]
+struct Record {
+    code: String,
+    name: String,
+    market: String
+}
 
 fn main() {
-    let connector = CleartextConnector::new(HOST);
-    let mut client = SimpleClient::with_connector(connector).unwrap();
-    // let resp = client.get( b"/finance?q=TYO%3A6641&ei=lZ_iVoihAsyZ0ATd4KqQBA", &[] ).unwrap();
-    // let resp = client.get( b"/finance/getprices?p=1d&f=d,h,o,l,c,v&i=300&x=INDEXNIKKEI&q=NI225", &[] ).unwrap();
-    let resp = client.get( b"/", &[ (b"User-Agent".to_vec(), UA.as_bytes().to_vec()  ) ] ).unwrap();
 
-    println!("{}", str::from_utf8(&resp.body).unwrap());
+    // let url = match env::args().nth(1) {
+    //     Some(url) => url,
+    //     None => {
+    //         println!("Usage: client <url>");
+    //         return;
+    //     }
+    // };
+
+    // let client = match env::var("HTTP_PROXY") {
+    //     Ok(mut proxy) => {
+    //         let mut port = 80;
+    //         if let Some(colon) = proxy.rfind(':') {
+    //             port = proxy[colon + 1..].parse().unwrap_or_else(|e| {
+    //                 panic!("HTTP_PROXY is malformed: {:?}, port parse error: {}", proxy, e);
+    //             });
+    //             proxy.truncate(colon);
+    //         }
+    //         Client::with_http_proxy(proxy, port)
+    //     },
+    //     _ => Client::new()
+    // };
+
+    // let mut res = client.get(URL)
+    //     .header(Connection::close())
+    //     .send().unwrap();
+
+    // println!("Response: {}", res.status);
+    // println!("Headers:\n{}", res.headers);
+    // io::copy(&mut res, &mut io::stdout()).unwrap();
+
+    let client = api_client::Ssl::new();
+    // let res = client.sync_get( URL );
+    // println!( "{}", res );
+
+    let mut file = csv::Reader::from_file("./data/stocks.csv").unwrap();
+    for r in file.decode().take(10) {
+        let r: Record = r.unwrap();
+        println!("({}, {}): {}", r.market, r.code, r.name);
+        let url = format!(
+            "http://www.google.com/finance/getprices?p={term}&f=d,h,o,l,c,v&i={tick}&x={market}&q={code}",
+            term = "1d", tick = 60, market = "TYO", code = r.code );
+        let res = &client.sync_get( &url );
+        println!( "{}", res );
+    }
 }
