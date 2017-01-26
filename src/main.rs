@@ -1,9 +1,15 @@
+extern crate chrono;
 extern crate csv;
 extern crate env_logger;
 extern crate hyper;
 extern crate hyper_openssl;
+extern crate regex;
 extern crate rustc_serialize;
 
+use std::str::FromStr;
+use chrono::*;
+use regex::Regex;
+use regex::Match;
 
 mod api_client;
 
@@ -54,13 +60,56 @@ fn main() {
     // println!( "{}", res );
 
     let mut file = csv::Reader::from_file("./data/stocks.csv").unwrap();
-    for r in file.decode().take(10) {
+
+    let x = i64::from_str("12345").unwrap();
+    println!( "{}", x );
+
+    let headRe = Regex::new( r"TIMEZONE_OFFSET=\d+\n" ).unwrap();
+
+    // let mut base_time:  
+    for r in file.decode() {
         let r: Record = r.unwrap();
         println!("({}, {}): {}", r.market, r.code, r.name);
         let url = format!(
             "http://www.google.com/finance/getprices?p={term}&f=d,h,o,l,c,v&i={tick}&x={market}&q={code}",
-            term = "1d", tick = 60, market = "TYO", code = r.code );
+            term = "7d", tick = 86400, market = "TYO", code = r.code );
         let res = &client.sync_get( &url );
-        println!( "{}", res );
+
+        let cols = columns( res );
+        println!( "{:?}", cols );
+
+        let nc = |mt: Match|{
+            println!( "{}", mt.end() );
+            mt.end()
+        };
+        let mat = headRe.find( res );
+        mat.map( |x|nc(x) );
+        // let caps = timeRe.captures( res ).unwrap();
+        // let t = caps.at(1).unwrap();
+
+// EXCHANGE%3DTYO
+// MARKET_OPEN_MINUTE=540
+// MARKET_CLOSE_MINUTE=900
+// INTERVAL=86400
+// COLUMNS=DATE,CLOSE,HIGH,LOW,OPEN,VOLUME
+// DATA_SESSIONS=[MORNING,540,690],[AFTERNOON,750,900]
+// DATA=
+// TIMEZONE_OFFSET=540
+// a1484632800,1104,1124,1103,1121,34500
+
+        // let lines = res.split("\n");
+        // for row in lines {
+        //     println!( "{}", row );
+        //     break;
+        // }
+
+        // println!( "{}", res );
     }
+}
+
+fn columns(s: &str) -> Vec<&str> {
+    let re = Regex::new( r"COLUMNS=([a-zA-Z,]+)" ).unwrap();
+    let caps = re.captures( s ).unwrap();
+    let cols = caps.at(1).unwrap();
+    return cols.split( "," ).collect::<Vec<&str>>();
 }
