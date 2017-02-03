@@ -64,7 +64,7 @@ fn main() {
     let x = i64::from_str("12345").unwrap();
     println!( "{}", x );
 
-    let headRe = Regex::new( r"TIMEZONE_OFFSET=\d+\n" ).unwrap();
+    let headre = Regex::new( r"TIMEZONE_OFFSET=\d+\n" ).unwrap();
 
     // let mut base_time:  
     for r in file.decode() {
@@ -74,7 +74,7 @@ fn main() {
             "http://www.google.com/finance/getprices?p={term}&f=d,h,o,l,c,v&i={tick}&x={market}&q={code}",
             term = "7d", tick = 86400, market = "TYO", code = r.code );
         let res = &client.sync_get( &url );
-
+        let len = res.len();
         let cols = columns( res );
         println!( "{:?}", cols );
 
@@ -82,8 +82,9 @@ fn main() {
             println!( "{}", mt.end() );
             mt.end()
         };
-        let mat = headRe.find( res );
-        mat.map( |x|nc(x) );
+        let mat = headre.find( res );
+        let start = mat.map_or( len, |x| x.end() );
+        println!( "{}, {}", start, len );
         // let caps = timeRe.captures( res ).unwrap();
         // let t = caps.at(1).unwrap();
 
@@ -110,6 +111,6 @@ fn main() {
 fn columns(s: &str) -> Vec<&str> {
     let re = Regex::new( r"COLUMNS=([a-zA-Z,]+)" ).unwrap();
     let caps = re.captures( s ).unwrap();
-    let cols = caps.at(1).unwrap();
+    let cols = caps.get(1).map_or( "", |x| x.as_str());
     return cols.split( "," ).collect::<Vec<&str>>();
 }
