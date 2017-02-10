@@ -23,6 +23,16 @@ struct Record {
     market: String
 }
 
+#[derive(RustcDecodable)]
+struct CsvRow {
+    date  : String,
+    close : f32,
+    high  : f32,
+    low   : f32,
+    open  : f32,
+    volume: u64
+}
+
 fn main() {
 
     // let url = match env::args().nth(1) {
@@ -55,18 +65,16 @@ fn main() {
     // println!("Headers:\n{}", res.headers);
     // io::copy(&mut res, &mut io::stdout()).unwrap();
 
+    
+//    DateTime::parse_from_str("2014-11-28 21:00:09 +09:00", "%Y-%m-%d %H:%M:%S %z")
+    let splitter_reg = Regex::new( r"TIMEZONE_OFFSET=\d+\n" ).unwrap();
+
     let client = api_client::Ssl::new();
     // let res = client.sync_get( URL );
     // println!( "{}", res );
 
     let mut file = csv::Reader::from_file("./data/stocks.csv").unwrap();
 
-    let x = i64::from_str("12345").unwrap();
-    println!( "{}", x );
-
-    let headre = Regex::new( r"TIMEZONE_OFFSET=\d+\n" ).unwrap();
-
-    // let mut base_time:  
     for r in file.decode() {
         let r: Record = r.unwrap();
         println!("({}, {}): {}", r.market, r.code, r.name);
@@ -76,17 +84,36 @@ fn main() {
         let res = &client.sync_get( &url );
         let len = res.len();
         let cols = columns( res );
-        println!( "{:?}", cols );
+        // println!( "{:?}", cols );
 
         let nc = |mt: Match|{
             println!( "{}", mt.end() );
             mt.end()
         };
-        let mat = headre.find( res );
+        let mat = splitter_reg.find( res );
         let start = mat.map_or( len, |x| x.end() );
-        println!( "{}, {}", start, len );
+        // println!( "{}, {}", start, len );
         // let caps = timeRe.captures( res ).unwrap();
         // let t = caps.at(1).unwrap();
+        let base_time = | mut rows: Vec<CsvRow>, index: usize | {
+            let ref mut row = rows[index];
+            let first = row.date.pop();
+            if Some( 'a' ).eq( &first ) {
+                return "";
+            }
+            return "";
+        };
+        let data = splitter_reg.split( res ).last().and_then( transform_csv );
+        let ref r = data.unwrap()[0];
+        println!( "head: {},{}",
+                   r.date,
+                   r.close
+        );
+
+        // match maybe_csv {
+        //     Some( csv ) => {
+        //     }
+        // }
 
 // EXCHANGE%3DTYO
 // MARKET_OPEN_MINUTE=540
@@ -114,3 +141,10 @@ fn columns(s: &str) -> Vec<&str> {
     let cols = caps.get(1).map_or( "", |x| x.as_str());
     return cols.split( "," ).collect::<Vec<&str>>();
 }
+
+fn transform_csv(data: &str) -> Option<Vec<CsvRow>> {
+    let mut rdr = csv::Reader::from_string( data )
+                              .has_headers(false);
+    rdr.decode().collect::<csv::Result<Vec<CsvRow>>>().ok()
+}
+
