@@ -93,57 +93,39 @@ fn main() {
 
     for r in file.decode() {
         let r: Record = r.unwrap();
-        // println!("({}, {}): {}", r.market, r.code, r.name);
+        println!("({}, {}): {}", r.market, r.code, r.name);
+
         let url = format!(
             "http://www.google.com/finance/getprices?p={term}&f=d,h,o,l,c,v&i={tick}&x={market}&q={code}",
             term = "7d", tick = INTERVAL, market = "TYO", code = r.code );
         let res = &client.sync_get( &url );
-        // let len = res.len();
-        // let cols = columns( res );
-        // println!( "{:?}", cols );
 
-        // let mat = splitter_reg.find( res );
-        // let start = mat.map_or( len, |x| x.end() );
-        // println!( "{}, {}", start, len );
-        // let caps = timeRe.captures( res ).unwrap();
-        // let t = caps.at(1).unwrap();
-        // let base_time = | mut rows: Vec<CsvRow>, index: usize | {
-        //     let ref mut row = rows[index];
-        //     let first = row.date.pop();
-        //     if Some( 'a' ).eq( &first ) {
-        //         return "";
-        //     }
-        //     return "";
-        // };
+        let data = splitter_reg.split( res ).last().and_then( transform_csv );
+        if data.is_none() {
+            break;
+        };
 
-        // let data = splitter_reg.split( res ).last().and_then( transform_csv );
-        let data = splitter_reg.split( res ).last().and_then( transform_csv ).unwrap();
-
-        // let ref r = data.unwrap()[0];
-        // println!( "head: {},{}",
-        //            r.date,
-        //            r.close
-        // );
         let mut new_data = Vec::new();
         let mut base_time: Option<DateTime<Local>> = None;
 
         // let idata: Vec<_> = (0..).zip(data.iter().flat_map(|x|x.iter())).collect();
-        let idata: Vec<_> = (0..).zip(data.iter()).collect();
+        for row in data.unwrap() {
 
-        for (index, row) in idata {
             let ref date = row.date;
             let new_date: String = match calc_time( date, INTERVAL, base_time ) {
-                Ok(t) => {
+                Ok( t ) => {
                     if date.starts_with( "a" ) {
                         base_time = Some( t );
-                    }
+                    };
                     t.format("%Y-%m-%d %H:%M:%S").to_string()
                 },
-                Err(e) => {
+                Err( e ) => {
                     println!( "cannot get datetime: {}", e );
                     "".to_string()
                 }
             };
+
+            println!( "new_date: {}", new_date );
             let new_row = CsvRow {
                 date  : new_date,
                 close : row.close,
@@ -153,8 +135,13 @@ fn main() {
                 volume: row.volume
             };
             new_data.push( new_row );
-        }
+        };
 
+        let diff = if new_data.first().is_some() && new_data.last().is_some() {
+            let before = new_data.first().unwrap().close;
+            let now = new_data.last().unwrap().close;
+            ( now - before ) / before
+        };
 
 // EXCHANGE%3DTYO
 // MARKET_OPEN_MINUTE=540
@@ -189,29 +176,20 @@ fn transform_csv(data: &str) -> Option<Vec<CsvRow>> {
     rdr.decode().collect::<csv::Result<Vec<CsvRow>>>().ok()
 }
 
-fn search_time(rows: &Vec<CsvRow>, index: usize) -> &str {
-    let ref row = rows[index];
-    if row.date.starts_with( "a" ) {
-        let (a, chars) = row.date.split_at(1);
-        return chars;
-    }
-    return search_time(rows, index - 1);
-}
-
 fn local_time(s: &str) -> Result<DateTime<Local>, String> {
     match s.parse::<i64>().map( |t| Local.timestamp( t, 0 ) ) {
         Ok(t) => Ok( t ),
-        Err(e) => Err( format!("cannot parse to i64: {}", s) )
+        Err(e) => Err( format!("cannot parse to i64: {}, because of {}", s, e) )
     }
 }
 
 fn calc_time(raw_value: &String, interval: i64, base_time: Option<DateTime<Local>>) -> Result<DateTime<Local>, String> {
     if raw_value.starts_with( "a" ) {
-        let (a, chars) = raw_value.split_at(1);
+        let (_, chars) = raw_value.split_at(1);
         return local_time( chars );
     }
     raw_value.parse::<i64>()
-        .map_err( |e| format!("cannot parse to i64: {}", raw_value) )
+        .map_err( |e| format!("cannot parse to i64: {}, because of {}", raw_value, e) )
         .and_then( |x| {
             match base_time {
                 Some(t) => Ok( t + Duration::seconds( x * interval ) ),
