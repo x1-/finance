@@ -19,6 +19,7 @@ mod api_client;
 //static url_base: &'static str = "http://www.google.com/finance/getprices?p={term}&f=d,h,o,l,c,v&i={tick}&x={market}&q={code}";
 
 static INTERVAL: i64 = 86400;
+const TIME_FORMAT: &'static str = "%Y-%m-%d %H:%M:%S";
 
 #[derive(RustcDecodable)]
 struct Record {
@@ -112,11 +113,11 @@ fn main() {
         for row in data.unwrap() {
 
             let ref date = row.date;
-            let new_date: String = match calc_time( date, INTERVAL, base_time ) {
+            let new_date: String = match calc_time( date, INTERVAL, &mut base_time ) {
                 Ok( t ) => {
-                    if date.starts_with( "a" ) {
-                        base_time = Some( t );
-                    };
+                    // if date.starts_with( "a" ) {
+                    //     base_time = Some( &mut t );
+                    // };
                     t.format("%Y-%m-%d %H:%M:%S").to_string()
                 },
                 Err( e ) => {
@@ -125,7 +126,6 @@ fn main() {
                 }
             };
 
-            println!( "new_date: {}", new_date );
             let new_row = CsvRow {
                 date  : new_date,
                 close : row.close,
@@ -137,11 +137,10 @@ fn main() {
             new_data.push( new_row );
         };
 
-        let diff = if new_data.first().is_some() && new_data.last().is_some() {
-            let before = new_data.first().unwrap().close;
-            let now = new_data.last().unwrap().close;
-            ( now - before ) / before
-        };
+        let rate = close_rate( &new_data );
+        if let Ok(x) = rate {
+            println!("rate: {}", x);
+        }
 
 // EXCHANGE%3DTYO
 // MARKET_OPEN_MINUTE=540
@@ -160,6 +159,20 @@ fn main() {
         // }
 
         // println!( "{}", res );
+    }
+}
+
+fn close(maybeRow: Option<&CsvRow>) -> Result<f32, String> {
+    maybeRow.map( |r|r.close ).ok_or( "cannot get row or row.close".to_string() )
+}
+
+fn close_rate(vec: &Vec<CsvRow>) -> Result<f32, String> {
+    let ( before, now ) = ( try!(close(vec.first())), try!(close(vec.last())) );
+    if before == 0.0 {
+        Err( "close value of first row is zero (0.0)".to_string() )
+    } else {
+        println!("close_rate: {}, {}", now, before);
+        Ok( (now - before) / before )
     }
 }
 
@@ -183,17 +196,22 @@ fn local_time(s: &str) -> Result<DateTime<Local>, String> {
     }
 }
 
-fn calc_time(raw_value: &String, interval: i64, base_time: Option<DateTime<Local>>) -> Result<DateTime<Local>, String> {
+fn calc_time(raw_value: &String, interval: i64, base_time: &mut Option<DateTime<Local>>) -> Result<String, String> {
     if raw_value.starts_with( "a" ) {
         let (_, chars) = raw_value.split_at(1);
-        return local_time( chars );
-    }
-    raw_value.parse::<i64>()
-        .map_err( |e| format!("cannot parse to i64: {}, because of {}", raw_value, e) )
-        .and_then( |x| {
-            match base_time {
-                Some(t) => Ok( t + Duration::seconds( x * interval ) ),
-                None    => Err( "base_time is maybe None".to_string() )
-            }
+        local_time( chars ).and_then( |t| {
+            base_time = *t
+        }).map( |t| {
+            t.format("%Y-%m-%d %H:%M:%S").to_string()
         })
+    }
+
+    let parsed = raw_value.parse::<i64>()
+        .map_err( |e| format!("cannot parse to i64: {}, because of {}", raw_value, e) )?;
+
+    let time = base_time.map( |t| {
+        t + Duration::seconds( parsed * interval )
+    } ).ok_or( "base_time is maybe None".to_string() )?;
+
+    Ok( time )
 }
