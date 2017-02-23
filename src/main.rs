@@ -7,6 +7,9 @@ extern crate regex;
 extern crate rustc_serialize;
 extern crate time;
 
+#[macro_use]
+extern crate lazy_static;
+
 use std::str::FromStr;
 use chrono::prelude::*;
 use regex::Regex;
@@ -20,6 +23,10 @@ mod api_client;
 
 static INTERVAL: i64 = 86400;
 const TIME_FORMAT: &'static str = "%Y-%m-%d %H:%M:%S";
+
+lazy_static! {
+    static ref splitter_reg: Regex = Regex::new( r"TIMEZONE_OFFSET=\d+\n" ).unwrap();
+}
 
 #[derive(RustcDecodable)]
 struct Record {
@@ -86,7 +93,6 @@ fn main() {
     println!( "{}", tmp4.format("%Y-%m-%d %H:%M:%S").to_string() );
 
 
-    let splitter_reg = Regex::new( r"TIMEZONE_OFFSET=\d+\n" ).unwrap();
 
     let client = api_client::Ssl::new();
 
@@ -94,7 +100,6 @@ fn main() {
 
     for r in file.decode() {
         let r: Record = r.unwrap();
-        println!("({}, {}): {}", r.market, r.code, r.name);
 
         let url = format!(
             "http://www.google.com/finance/getprices?p={term}&f=d,h,o,l,c,v&i={tick}&x={market}&q={code}",
@@ -109,32 +114,21 @@ fn main() {
         let mut new_data = Vec::new();
         let mut base_time: Option<DateTime<Local>> = None;
 
-        // let idata: Vec<_> = (0..).zip(data.iter().flat_map(|x|x.iter())).collect();
         for row in data.unwrap() {
 
             let ref date = row.date;
-            let new_date: String = match calc_time( date, INTERVAL, &mut base_time ) {
-                Ok( t ) => {
-                    // if date.starts_with( "a" ) {
-                    //     base_time = Some( &mut t );
-                    // };
-                    t.format("%Y-%m-%d %H:%M:%S").to_string()
-                },
-                Err( e ) => {
-                    println!( "cannot get datetime: {}", e );
-                    "".to_string()
-                }
-            };
-
-            let new_row = CsvRow {
-                date  : new_date,
-                close : row.close,
-                high  : row.high,
-                low   : row.low,
-                open  : row.open,
-                volume: row.volume
-            };
-            new_data.push( new_row );
+            if let Ok(new_date) = calc_time( date, INTERVAL, &mut base_time ) {
+                println!("date: {}", new_date);
+                let new_row = CsvRow {
+                    date  : new_date,
+                    close : row.close,
+                    high  : row.high,
+                    low   : row.low,
+                    open  : row.open,
+                    volume: row.volume
+                };
+                new_data.push( new_row );
+            }
         };
 
         let rate = close_rate( &new_data );
@@ -176,17 +170,38 @@ fn close_rate(vec: &Vec<CsvRow>) -> Result<f32, String> {
     }
 }
 
-fn columns(s: &str) -> Vec<&str> {
-    let re = Regex::new( r"COLUMNS=([a-zA-Z,]+)" ).unwrap();
-    let caps = re.captures( s ).unwrap();
-    let cols = caps.get(1).map_or( "", |x| x.as_str());
-    return cols.split( "," ).collect::<Vec<&str>>();
-}
-
-fn transform_csv(data: &str) -> Option<Vec<CsvRow>> {
+fn transform_csv(data: &str) -> Result<Vec<CsvRow>, String> {
     let mut rdr = csv::Reader::from_string( data )
                               .has_headers(false);
-    rdr.decode().collect::<csv::Result<Vec<CsvRow>>>().ok()
+    rdr.decode().collect::<csv::Result<Vec<CsvRow>>>()
+        .map_err( |e|e.to_string() )
+}
+
+fn data_to_struct(res: &str) -> Result<Vec<CsvRow>, String>{
+    let mut new_data: Vec<CsvRow> = Vec::new();
+    let mut base_time: Option<DateTime<Local>> = None;
+
+    let data = splitter_reg.split( res ).last()
+        .ok_or( "cannot get data section".to_string() )
+        .and_then( transform_csv )?;
+
+    for row in data {
+
+        let ref date = row.date;
+        if let Ok(new_date) = calc_time( date, INTERVAL, &mut base_time ) {
+            println!("date: {}", new_date);
+            let new_row = CsvRow {
+                date  : new_date,
+                close : row.close,
+                high  : row.high,
+                low   : row.low,
+                open  : row.open,
+                volume: row.volume
+            };
+            new_data.push( new_row );
+        }
+    };
+    return new_data
 }
 
 fn local_time(s: &str) -> Result<DateTime<Local>, String> {
@@ -199,11 +214,13 @@ fn local_time(s: &str) -> Result<DateTime<Local>, String> {
 fn calc_time(raw_value: &String, interval: i64, base_time: &mut Option<DateTime<Local>>) -> Result<String, String> {
     if raw_value.starts_with( "a" ) {
         let (_, chars) = raw_value.split_at(1);
-        local_time( chars ).and_then( |t| {
-            base_time = *t
-        }).map( |t| {
-            t.format("%Y-%m-%d %H:%M:%S").to_string()
-        })
+        let time = local_time( chars );
+        if let Ok(t) = time {
+            *base_time = Some( t );
+        }
+        return time.map( |t| {
+            t.format(TIME_FORMAT).to_string()
+        });
     }
 
     let parsed = raw_value.parse::<i64>()
@@ -213,5 +230,5 @@ fn calc_time(raw_value: &String, interval: i64, base_time: &mut Option<DateTime<
         t + Duration::seconds( parsed * interval )
     } ).ok_or( "base_time is maybe None".to_string() )?;
 
-    Ok( time )
+    Ok( time.format(TIME_FORMAT).to_string() )
 }
