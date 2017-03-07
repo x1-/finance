@@ -5,16 +5,24 @@ extern crate hyper;
 extern crate hyper_openssl;
 extern crate regex;
 extern crate rustc_serialize;
+extern crate time;
 
-use std::str::FromStr;
-use chrono::*;
+#[macro_use]
+extern crate lazy_static;
+
+use chrono::prelude::*;
 use regex::Regex;
-use regex::Match;
+use time::Duration;
 
 mod api_client;
 
-//static URL: &'static str = "https://www.google.co.jp/";
-//static url_base: &'static str = "http://www.google.com/finance/getprices?p={term}&f=d,h,o,l,c,v&i={tick}&x={market}&q={code}";
+static INTERVAL: i64 = 86400;
+const TIME_FORMAT: &'static str = "%Y-%m-%d %H:%M:%S";
+const URL_BASE: &'static str = "http://www.google.com/finance/getprices";
+
+lazy_static! {
+    static ref SPLITTER_REG: Regex = Regex::new( r"TIMEZONE_OFFSET=\d+\n" ).unwrap();
+}
 
 #[derive(RustcDecodable)]
 struct Record {
@@ -23,93 +31,112 @@ struct Record {
     market: String
 }
 
+#[derive(RustcDecodable)]
+struct CsvRow {
+    date  : String,
+    close : f32,
+    high  : f32,
+    low   : f32,
+    open  : f32,
+    volume: u64
+}
+
 fn main() {
 
-    // let url = match env::args().nth(1) {
-    //     Some(url) => url,
-    //     None => {
-    //         println!("Usage: client <url>");
-    //         return;
-    //     }
-    // };
-
-    // let client = match env::var("HTTP_PROXY") {
-    //     Ok(mut proxy) => {
-    //         let mut port = 80;
-    //         if let Some(colon) = proxy.rfind(':') {
-    //             port = proxy[colon + 1..].parse().unwrap_or_else(|e| {
-    //                 panic!("HTTP_PROXY is malformed: {:?}, port parse error: {}", proxy, e);
-    //             });
-    //             proxy.truncate(colon);
-    //         }
-    //         Client::with_http_proxy(proxy, port)
-    //     },
-    //     _ => Client::new()
-    // };
-
-    // let mut res = client.get(URL)
-    //     .header(Connection::close())
-    //     .send().unwrap();
-
-    // println!("Response: {}", res.status);
-    // println!("Headers:\n{}", res.headers);
-    // io::copy(&mut res, &mut io::stdout()).unwrap();
-
     let client = api_client::Ssl::new();
-    // let res = client.sync_get( URL );
-    // println!( "{}", res );
 
     let mut file = csv::Reader::from_file("./data/stocks.csv").unwrap();
 
-    let x = i64::from_str("12345").unwrap();
-    println!( "{}", x );
-
-    let headRe = Regex::new( r"TIMEZONE_OFFSET=\d+\n" ).unwrap();
-
-    // let mut base_time:  
     for r in file.decode() {
         let r: Record = r.unwrap();
-        println!("({}, {}): {}", r.market, r.code, r.name);
+
         let url = format!(
-            "http://www.google.com/finance/getprices?p={term}&f=d,h,o,l,c,v&i={tick}&x={market}&q={code}",
-            term = "7d", tick = 86400, market = "TYO", code = r.code );
+            "{uri}?f=d,h,o,l,c,v&p={term}&i={tick}&x={market}&q={code}",
+            uri = URL_BASE,
+            term = "7d", tick = INTERVAL, market = "TYO", code = r.code );
+
         let res = &client.sync_get( &url );
 
-        let cols = columns( res );
-        println!( "{:?}", cols );
-
-        let nc = |mt: Match|{
-            println!( "{}", mt.end() );
-            mt.end()
-        };
-        let mat = headRe.find( res );
-        mat.map( |x|nc(x) );
-        // let caps = timeRe.captures( res ).unwrap();
-        // let t = caps.at(1).unwrap();
-
-// EXCHANGE%3DTYO
-// MARKET_OPEN_MINUTE=540
-// MARKET_CLOSE_MINUTE=900
-// INTERVAL=86400
-// COLUMNS=DATE,CLOSE,HIGH,LOW,OPEN,VOLUME
-// DATA_SESSIONS=[MORNING,540,690],[AFTERNOON,750,900]
-// DATA=
-// TIMEZONE_OFFSET=540
-// a1484632800,1104,1124,1103,1121,34500
-
-        // let lines = res.split("\n");
-        // for row in lines {
-        //     println!( "{}", row );
-        //     break;
-        // }
-
-        // println!( "{}", res );
+        let rate = data_to_struct( res ).and_then(|dt| close_rate( &dt ));
+        if let Ok(x) = rate {
+            println!("rate: {:?}", x);
+        }
     }
 }
 
-fn columns(s: &str) -> Vec<&str> {
-    let re = Regex::new( r"COLUMNS=([a-zA-Z,]+)" ).unwrap();
-    let caps = re.captures( s ).unwrap();
-    let cols = caps.at(1).unwrap();
-    return cols.split( "," ).collect::<Vec<&str>>();
+fn close(maybe_row: Option<&CsvRow>) -> Result<f32, String> {
+    maybe_row.map( |r|r.close ).ok_or( "cannot get row or row.close".to_string() )
+}
+
+fn close_rate(vec: &Vec<CsvRow>) -> Result<f32, String> {
+    let ( before, now ) = ( try!(close(vec.first())), try!(close(vec.last())) );
+    if before == 0.0 {
+        Err( "close value of first row is zero (0.0)".to_string() )
+    } else {
+        println!("close_rate: {}, {}", now, before);
+        Ok( (now - before) / before )
+    }
+}
+
+fn transform_csv(data: &str) -> Result<Vec<CsvRow>, String> {
+    let mut rdr = csv::Reader::from_string( data )
+                              .has_headers(false);
+    rdr.decode().collect::<csv::Result<Vec<CsvRow>>>()
+        .map_err( |e|e.to_string() )
+}
+
+fn data_to_struct(res: &str) -> Result<Vec<CsvRow>, String> {
+    let mut new_data: Vec<CsvRow> = Vec::new();
+    let mut base_time: Option<DateTime<Local>> = None;
+
+    let data = SPLITTER_REG.split( res ).last()
+        .ok_or( "cannot get data section".to_string() )
+        .and_then( transform_csv )?;
+
+    for row in data {
+
+        let ref date = row.date;
+        if let Ok(new_date) = calc_time( date, INTERVAL, &mut base_time ) {
+            println!("date: {}", new_date);
+            let new_row = CsvRow {
+                date  : new_date,
+                close : row.close,
+                high  : row.high,
+                low   : row.low,
+                open  : row.open,
+                volume: row.volume
+            };
+            new_data.push( new_row );
+        }
+    };
+    return Ok(new_data);
+}
+
+fn local_time(s: &str) -> Result<DateTime<Local>, String> {
+    match s.parse::<i64>().map( |t| Local.timestamp( t, 0 ) ) {
+        Ok(t) => Ok( t ),
+        Err(e) => Err( format!("cannot parse to i64: {}, because of {}", s, e) )
+    }
+}
+
+fn calc_time(raw_value: &String, interval: i64, base_time: &mut Option<DateTime<Local>>) -> Result<String, String> {
+    if raw_value.starts_with( "a" ) {
+        let (_, chars) = raw_value.split_at(1);
+        let time = local_time( chars );
+        if let Ok(t) = time {
+            *base_time = Some( t );
+        }
+        return time.map( |t| {
+            t.format(TIME_FORMAT).to_string()
+        });
+    }
+
+    let parsed = raw_value.parse::<i64>()
+        .map_err( |e| format!("cannot parse to i64: {}, because of {}", raw_value, e) )?;
+
+    let time = base_time.map( |t| {
+        t + Duration::seconds( parsed * interval )
+    } ).ok_or( "base_time is maybe None".to_string() )?;
+
+    Ok( time.format(TIME_FORMAT).to_string() )
 }
