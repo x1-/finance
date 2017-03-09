@@ -1,18 +1,19 @@
 [package]
 name = "finance"
-version = "0.1.2"
+version = "0.1.4"
 authors = ["x1 <viva008@gmail.com>"]
 
 [dependencies]
-chrono = "^0.3"
-csv = "^0.14"
-env_logger = "^0.3"
+chrono = "0.3"
+csv = "0.14"
+docopt = "0.7"
+env_logger = "0.3"
 futures = "^0.1.7"
-hyper = "^0.10"
+hyper = "0.10"
 hyper-openssl = "^0.2.1"
 lazy_static = "^0.2.2"
 regex = "^0.2.1"
 rustc-serialize = "*"
-slack-hook = "^0.3"
-time = "^0.1"
+slack-hook = "0.3"
+time = "0.1"
 tokio-core = "^0.1.3"
