@@ -24,19 +24,19 @@ mod api_client;
 const USAGE: &'static str = r"
 to notice kabu rate of up or down at slack-channel.
 Usage:
-  finance --webhook=<url> [--term=<term>] [--tick=<tick>] [--ratio=<ratio>]
+  finance --webhook=<url> --tick=<tick> --ratio=<ratio> [--term=<term>] [--data=<csv>]
   finance --version
 Options:
   -h --help       Show this message.
   --version       Show version.
   --webhook=<url> webhook url of slack integration.
-  --term=<term>   the term of measuring price [default 7d].
   --tick=<tick>   candle tick interval by seconds [default 86400].
   --ratio=<ratio> the threshold ratio of price up or down [default 0.1].
+  --term=<term>   the term of measuring price [default 7d].
+  --data=<csv>    the csv listed the stocks [default ./data/stocks.csv].
 ";
 
 
-const DATE_FORMAT: &'static str = "%Y-%m-%d";
 const URL_BASE: &'static str = "http://www.google.com/finance/getprices?f=d,h,o,l,c,v";
 
 lazy_static! {
@@ -46,9 +46,10 @@ lazy_static! {
 #[derive(Debug, RustcDecodable)]
 struct Args {
     flag_webhook: String,
-    flag_term   : String,
     flag_tick   : i64,
-    flag_ratio  : f32
+    flag_ratio  : f32,
+    flag_term   : String,
+    flag_data   : String
 }
 
 #[derive(Debug, RustcDecodable)]
@@ -88,19 +89,25 @@ struct ComparedPrice {
 fn main() {
 
     let args: Args = Docopt::new(USAGE)
-                            .and_then(|d| d.decode())
-                            .unwrap_or_else(|e| e.exit());
-    println!("{:?}", args);
+        .and_then(|d| d.decode())
+        .and_then(|a: Args| {
+            let _args = Args {
+                flag_webhook: a.flag_webhook,
+                flag_tick   : a.flag_tick,
+                flag_ratio  : a.flag_ratio,
+                flag_term   : if a.flag_term.is_empty() { String::from("7d") } else { a.flag_term },
+                flag_data   : if a.flag_data.is_empty() { String::from("./data/stocks.csv") } else { a.flag_data }
+            };
+            Ok( _args )
+        })
+        .unwrap_or_else(|e| e.exit());
 
-    // if let Ok(s) = r {
-    //     println!( "min:{}, max:{}", s.MIN, s.MAX );
-    //     return;
-    // };
+    println!("{:?}", args);
 
     let client = api_client::Ssl::new();
     let slack = Slack::new( args.flag_webhook.as_str() ).unwrap();
 
-    let mut file = csv::Reader::from_file("./data/stocks.csv").unwrap();
+    let mut file = csv::Reader::from_file( args.flag_data ).unwrap();
 
     for r in file.decode() {
         let r: Record = r.unwrap();
@@ -118,8 +125,8 @@ fn main() {
         match rprice {
             Ok( ref p ) if p.ratio >= args.flag_ratio || p.ratio < -(args.flag_ratio) => {
                 let payload = slack_payload( r.code, r.name, p.current, p.previous, p.ratio );
-                slack.send( &payload );
-                println!("payload: {:?}", payload);
+                let res = slack.send( &payload );
+                println!("res: {:?}, payload: {:?}", res, payload);
             },
             Ok( ref p )  => println!( "rate is greater than -{th} or less than {th}. ratio:{ratio}", th = args.flag_ratio, ratio = p.ratio ),
             _ => println!( "cannot calculate ratio" )
@@ -196,8 +203,8 @@ fn close(maybe_row: Option<&Stock>) -> Result<f32, String> {
 }
 
 fn previous_close(vec: &Vec<Stock>) -> Result<f32, String> {
-    let maybeDay = first_day(vec)?;
-    let fday = maybeDay.date();
+    let maybe_day = first_day(vec)?;
+    let fday = maybe_day.date();
     let last_stocks = vec.into_iter().take_while(|s| s.date.date() == fday );
     close( last_stocks.last() )
 }
