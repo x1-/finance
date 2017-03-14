@@ -128,7 +128,7 @@ fn main() {
                 let res = slack.send( &payload );
                 println!("res: {:?}, payload: {:?}", res, payload);
             },
-            Ok( ref p )  => println!( "rate is greater than -{th} or less than {th}. ratio:{ratio}", th = args.flag_ratio, ratio = p.ratio ),
+            Ok( ref p )  => println!( "rate is less than {th}. ratio:{ratio:.3}, [{code}:{name}, now:{current}]", th = args.flag_ratio, ratio = p.ratio, code = r.code, name = r.name, current = p.current ),
             _ => println!( "cannot calculate ratio" )
         }
     }
@@ -226,7 +226,7 @@ fn close_rate(vec: &Vec<Stock>) -> Result<ComparedPrice, String> {
 fn slack_payload(code: String, name: String, current: f32, previous: f32, rate: f32) -> Payload {
     let emoji = if rate > 0.0 { ":chart_with_upwards_trend:" } else { ":chart_with_downwards_trend:" };
 
-    let message = format!("{code}:{name} 現在値:￥{current} ( 変化率: {rate}, 前値:￥{previous} ).",
+    let message = format!("{code}:{name} 現在値:￥{current} ( 変化率: {rate:.3}, 前値:￥{previous} ).",
                           code = code,
                           name = name,
                           current = current,
