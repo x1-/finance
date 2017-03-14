@@ -24,14 +24,14 @@ mod api_client;
 const USAGE: &'static str = r"
 to notice kabu rate of up or down at slack-channel.
 Usage:
-  finance --webhook=<url> --tick=<tick> --ratio=<ratio> [--term=<term>] [--data=<csv>]
+  finance --tick=<tick> --ratio=<ratio> [--webhook=<url>] [--term=<term>] [--data=<csv>]
   finance --version
 Options:
   -h --help       Show this message.
   --version       Show version.
-  --webhook=<url> webhook url of slack integration.
   --tick=<tick>   candle tick interval by seconds [default 86400].
   --ratio=<ratio> the threshold ratio of price up or down [default 0.1].
+  --webhook=<url> webhook url of slack integration. if empty, do not send slack [default empty].
   --term=<term>   the term of measuring price [default 7d].
   --data=<csv>    the csv listed the stocks [default ./data/stocks.csv].
 ";
@@ -105,7 +105,7 @@ fn main() {
     println!("{:?}", args);
 
     let client = api_client::Ssl::new();
-    let slack = Slack::new( args.flag_webhook.as_str() ).unwrap();
+    let slack = Slack::new( args.flag_webhook.as_str() );
 
     let mut file = csv::Reader::from_file( args.flag_data ).unwrap();
 
@@ -125,8 +125,11 @@ fn main() {
         match rprice {
             Ok( ref p ) if p.ratio >= args.flag_ratio || p.ratio < -(args.flag_ratio) => {
                 let payload = slack_payload( r.code, r.name, p.current, p.previous, p.ratio );
-                let res = slack.send( &payload );
-                println!("res: {:?}, payload: {:?}", res, payload);
+                if let Ok(ref s) = slack {
+                    let res = s.send( &payload );
+                    println!("res: {:?}", res);
+                }
+                println!("found: {:?}", payload);
             },
             Ok( ref p )  => println!( "rate is less than {th}. ratio:{ratio:.3}, [{code}:{name}, now:{current}]", th = args.flag_ratio, ratio = p.ratio, code = r.code, name = r.name, current = p.current ),
             _ => println!( "cannot calculate ratio" )
